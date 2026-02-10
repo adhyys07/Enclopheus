@@ -1,0 +1,27 @@
+{
+  "name": "enclopheus",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/adhyys07/Enclopheus.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "bugs": {
+    "url": "https://github.com/adhyys07/Enclopheus/issues"
+  },
+  "homepage": "https://github.com/adhyys07/Enclopheus#readme",
+  "dependencies": {
+    "@slack/bolt": "^4.6.0",
+    "dotenv": "^17.2.4",
+    "pg": "^8.18.0",
+    "uuid": "^13.0.0"
+  }
+}
