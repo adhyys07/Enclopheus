@@ -20,3 +20,10 @@ CREATE TABLE IF NOT EXISTS messages (
     content TEXT NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Blocked users table
+CREATE TABLE IF NOT EXISTS blocked_users (
+    slack_user_id TEXT PRIMARY KEY REFERENCES users(slack_id),
+    blocked_by TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
