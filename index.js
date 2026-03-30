@@ -217,8 +217,10 @@ function shouldHideFieldKey(key) {
 
 function buildCustomMessage(record, slackId, isNew, tableName, template) {
   const fields = record.fields || {};
+  // Always mention the user for Workshops
+  const mentionValue = tableName === 'Workshops' ? '<@U082UPTRQU8>' : (slackId ? `<@${slackId}>` : "User");
   const tokens = {
-    mention: slackId ? `<@${slackId}>` : "User",
+    mention: mentionValue,
     slackId: slackId || "",
     table: tableName,
     event: isNew ? "created" : "updated",
@@ -491,7 +493,7 @@ async function pollSecondAirtableAndNotify() {
 
     let messageTemplate = AIRTABLE_SECOND_CUSTOM_MESSAGE_TEMPLATE;
     if (statusNow === AIRTABLE_SECOND_REJECTED_VALUE.toLowerCase()) {
-      messageTemplate = process.env.AIRTABLE_SECOND_REJECTED_MESSAGE_TEMPLATE || 'Hey <@U082UPTRQU8>, your workshop was rejected. Please contact support if you have questions.';
+      messageTemplate = process.env.AIRTABLE_SECOND_REJECTED_MESSAGE_TEMPLATE || 'Hey {mention}, your workshop was rejected. Please contact support if you have questions.';
     } else if (statusNow === 'closed') {
       messageTemplate = process.env.AIRTABLE_SECOND_CLOSED_MESSAGE_TEMPLATE || 'Hey {mention}, your enclosure workshop is now closed. Please ensure all submissions are complete. If you have questions, contact the admin.';
     }
@@ -506,6 +508,7 @@ async function pollSecondAirtableAndNotify() {
       text: messageText,
     });
 
+    // Only send to channel if not rejected
     if (statusNow !== AIRTABLE_SECOND_REJECTED_VALUE.toLowerCase()) {
       await slack.client.chat.postMessage({
         channel: AIRTABLE_SECOND_NOTIFY_CHANNEL_ID,
