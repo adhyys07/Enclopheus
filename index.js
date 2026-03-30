@@ -95,6 +95,8 @@ const AIRTABLE_APPROVAL_FIELD = process.env.AIRTABLE_APPROVAL_FIELD || "Review S
 const AIRTABLE_APPROVAL_VALUE = process.env.AIRTABLE_APPROVAL_VALUE || "Approved";
 const AIRTABLE_NOTIFY_MODE = (process.env.AIRTABLE_NOTIFY_MODE || "dm").toLowerCase();
 const AIRTABLE_NOTIFY_ON_INIT_APPROVED = (process.env.AIRTABLE_NOTIFY_ON_INIT_APPROVED || "true").toLowerCase() === "true";
+const AIRTABLE_MAIL_STATUS_FIELD = process.env.AIRTABLE_MAIL_STATUS_FIELD || "Mail Status";
+const AIRTABLE_MAIL_STATUS_SHIPPED_VALUE = process.env.AIRTABLE_MAIL_STATUS_SHIPPED_VALUE || "Shipped";
 const AIRTABLE_NOTIFY_FIELDS = (process.env.AIRTABLE_NOTIFY_FIELDS || "")
   .split(",")
   .map((s) => s.trim())
@@ -104,6 +106,8 @@ const AIRTABLE_SECOND_TABLE_NAME = process.env.AIRTABLE_SECOND_TABLE_NAME;
 const AIRTABLE_SECOND_NOTIFY_CHANNEL_ID = process.env.SLACK_AIRTABLE_SECOND_CHANNEL_ID;
 const AIRTABLE_SECOND_SLACK_ID_FIELD = process.env.AIRTABLE_SECOND_SLACK_ID_FIELD || AIRTABLE_SLACK_ID_FIELD;
 const AIRTABLE_SECOND_CUSTOM_MESSAGE_TEMPLATE = process.env.AIRTABLE_SECOND_CUSTOM_MESSAGE_TEMPLATE || "{mention} your record in {table} was {event}.";
+const AIRTABLE_SECOND_STATUS_FIELD = process.env.AIRTABLE_SECOND_STATUS_FIELD || "Status";
+const AIRTABLE_SECOND_REJECTED_VALUE = process.env.AIRTABLE_SECOND_REJECTED_VALUE || "Rejected";
 const AIRTABLE_SECOND_NOTIFY_FIELDS = (process.env.AIRTABLE_SECOND_NOTIFY_FIELDS || "")
   .split(",")
   .map((s) => s.trim())
@@ -173,23 +177,71 @@ function isApprovedRecord(record) {
   return String(raw).trim().toLowerCase() === AIRTABLE_APPROVAL_VALUE.toLowerCase();
 }
 
+function isMailStatusShipped(fields = {}) {
+  const raw = fields[AIRTABLE_MAIL_STATUS_FIELD];
+
+  if (raw === undefined || raw === null) {
+    return false;
+  }
+
+  if (Array.isArray(raw)) {
+    return raw.some((value) => String(value).trim().toLowerCase() === AIRTABLE_MAIL_STATUS_SHIPPED_VALUE.toLowerCase());
+  }
+
+  return String(raw).trim().toLowerCase() === AIRTABLE_MAIL_STATUS_SHIPPED_VALUE.toLowerCase();
+}
+
+function didMailStatusChange(previousFields = {}, currentFields = {}) {
+  return JSON.stringify(previousFields[AIRTABLE_MAIL_STATUS_FIELD]) !== JSON.stringify(currentFields[AIRTABLE_MAIL_STATUS_FIELD]);
+}
+
+function getSecondTableStatusValue(fields = {}) {
+  const raw = fields[AIRTABLE_SECOND_STATUS_FIELD];
+
+  if (raw === undefined || raw === null) {
+    return "";
+  }
+
+  if (Array.isArray(raw)) {
+    const first = raw.find((value) => String(value).trim().length > 0);
+    return first ? String(first).trim().toLowerCase() : "";
+  }
+
+  return String(raw).trim().toLowerCase();
+}
+
+function shouldHideFieldKey(key) {
+  const normalized = String(key).trim().toLowerCase();
+  return normalized.includes("email") || normalized.includes("last updated") || normalized.includes("record id");
+}
+
 function buildCustomMessage(record, slackId, isNew, tableName, template) {
   const fields = record.fields || {};
   const tokens = {
     mention: slackId ? `<@${slackId}>` : "User",
     slackId: slackId || "",
-    recordId: record.id,
     table: tableName,
     event: isNew ? "created" : "updated",
   };
 
+  const tokenEntries = Object.entries(tokens);
+  const fieldEntries = Object.entries(fields);
+
   return template.replace(/\{([^}]+)\}/g, (match, key) => {
     const trimmedKey = String(key).trim();
-    if (Object.prototype.hasOwnProperty.call(tokens, trimmedKey)) {
-      return tokens[trimmedKey];
+    const normalizedKey = trimmedKey.toLowerCase();
+
+    const tokenMatch = tokenEntries.find(([tokenKey]) => tokenKey.toLowerCase() === normalizedKey);
+    if (tokenMatch) {
+      return tokenMatch[1];
     }
-    if (Object.prototype.hasOwnProperty.call(fields, trimmedKey)) {
-      const value = fields[trimmedKey];
+
+    const fieldMatch = fieldEntries.find(([fieldKey]) => String(fieldKey).trim().toLowerCase() === normalizedKey);
+    if (fieldMatch) {
+      const [fieldKey, value] = fieldMatch;
+      if (shouldHideFieldKey(fieldKey)) {
+        return "";
+      }
       if (Array.isArray(value)) return value.join(", ");
       if (value === undefined || value === null) return "";
       if (typeof value === "object") return JSON.stringify(value);
@@ -211,7 +263,9 @@ function formatAirtableRecord(record, slackId, isNew, config) {
     ? notifyFields
     : Object.keys(fields).slice(0, 5);
 
-  const lines = pickedKeys.map((key) => {
+  const safeKeys = pickedKeys.filter((key) => !shouldHideFieldKey(key));
+
+  const lines = safeKeys.map((key) => {
     const value = fields[key];
     if (value === undefined || value === null || value === "") {
       return `• *${key}:* _empty_`;
@@ -232,7 +286,6 @@ function formatAirtableRecord(record, slackId, isNew, config) {
   return [
     customMessage,
     `${emoji} *${status}* entry in *${tableName}*`,
-    `Record ID: \`${record.id}\``,
     ...lines,
   ].join("\n");
 }
@@ -255,31 +308,48 @@ async function fetchAirtableRecords(tableName) {
   return data.records || [];
 }
 
-async function sendFirstTableNotification(record) {
-  if (!isApprovedRecord(record)) {
+async function sendFirstTableNotification(record, options = {}) {
+  const { forceDmOnly = false } = options;
+  const slackId = normalizeSlackId((record.fields || {})[AIRTABLE_SLACK_ID_FIELD]);
+  
+  if (!slackId) {
+    console.warn(`Skipped Airtable update ${record.id}: missing Slack ID field '${AIRTABLE_SLACK_ID_FIELD}'.`);
     return;
   }
 
-  const slackId = normalizeSlackId((record.fields || {})[AIRTABLE_SLACK_ID_FIELD]);
   const messageText = formatAirtableRecord(record, slackId, false, {
     tableName: AIRTABLE_TABLE_NAME,
     notifyFields: AIRTABLE_NOTIFY_FIELDS,
     messageTemplate: AIRTABLE_CUSTOM_MESSAGE_TEMPLATE,
   });
 
-  if (!slackId) {
-    console.warn(`Skipped Airtable approved update ${record.id}: missing Slack ID field '${AIRTABLE_SLACK_ID_FIELD}'.`);
+  const isApproved = isApprovedRecord(record);
+
+  if (forceDmOnly) {
+    await slack.client.chat.postMessage({
+      channel: slackId,
+      text: messageText,
+    });
     return;
   }
 
-  await slack.client.chat.postMessage({
-    channel: slackId,
-    text: messageText,
-  });
-
-  if (AIRTABLE_NOTIFY_MODE === "channel" && AIRTABLE_NOTIFY_CHANNEL_ID) {
+  if (isApproved) {
+    // Approved: send DM and post to channel.
     await slack.client.chat.postMessage({
-      channel: AIRTABLE_NOTIFY_CHANNEL_ID,
+      channel: slackId,
+      text: messageText,
+    });
+
+    if (AIRTABLE_NOTIFY_CHANNEL_ID) {
+      await slack.client.chat.postMessage({
+        channel: AIRTABLE_NOTIFY_CHANNEL_ID,
+        text: messageText,
+      });
+    }
+  } else {
+    // Not approved: send DM only
+    await slack.client.chat.postMessage({
+      channel: slackId,
       text: messageText,
     });
   }
@@ -301,6 +371,7 @@ async function pollAirtableAndNotify() {
     for (const record of records) {
       seenAirtableRecords.set(record.id, {
         fingerprint: getRecordFingerprint(record),
+        fields: record.fields || {},
       });
       if (AIRTABLE_NOTIFY_ON_INIT_APPROVED && isApprovedRecord(record)) {
         approvedOnInit.push(record);
@@ -323,16 +394,34 @@ async function pollAirtableAndNotify() {
     if (!seen) {
       seenAirtableRecords.set(record.id, {
         fingerprint: getRecordFingerprint(record),
+        fields: record.fields || {},
       });
     } else if (getRecordFingerprint(record) !== seen.fingerprint) {
-      changedRecords.push(record);
+      changedRecords.push({
+        record,
+        previousFields: seen.fields || {},
+      });
       seenAirtableRecords.set(record.id, {
         fingerprint: getRecordFingerprint(record),
+        fields: record.fields || {},
       });
     }
   }
 
-  for (const record of changedRecords) {
+  for (const { record, previousFields } of changedRecords) {
+    const mailStatusChanged = didMailStatusChange(previousFields, record.fields || {});
+
+    const shippedNow = isMailStatusShipped(record.fields || {});
+    const shippedBefore = isMailStatusShipped(previousFields);
+    if (shippedNow && !shippedBefore) {
+      console.log(`Airtable record ${record.id} mail status changed to '${AIRTABLE_MAIL_STATUS_SHIPPED_VALUE}'. Sending Slack DM only.`);
+    }
+
+    if (mailStatusChanged) {
+      await sendFirstTableNotification(record, { forceDmOnly: true });
+      continue;
+    }
+
     await sendFirstTableNotification(record);
   }
 }
@@ -352,6 +441,7 @@ async function pollSecondAirtableAndNotify() {
     for (const record of records) {
       seenAirtableSecondRecords.set(record.id, {
         fingerprint: getRecordFingerprint(record),
+        fields: record.fields || {},
       });
     }
     airtableSecondInitialized = true;
@@ -367,28 +457,61 @@ async function pollSecondAirtableAndNotify() {
     if (!seen) {
       seenAirtableSecondRecords.set(record.id, {
         fingerprint: getRecordFingerprint(record),
+        fields: record.fields || {},
       });
       continue;
     }
 
     if (getRecordFingerprint(record) !== seen.fingerprint) {
-      changedRecords.push(record);
+      changedRecords.push({
+        record,
+        previousFields: seen.fields || {},
+      });
       seenAirtableSecondRecords.set(record.id, {
         fingerprint: getRecordFingerprint(record),
+        fields: record.fields || {},
       });
     }
   }
 
-  for (const record of changedRecords) {
+  for (const { record, previousFields } of changedRecords) {
+    const statusNow = getSecondTableStatusValue(record.fields || {});
+    const statusBefore = getSecondTableStatusValue(previousFields);
+
+    if (!statusNow || statusNow === statusBefore) {
+      continue;
+    }
+
     const slackId = normalizeSlackId((record.fields || {})[AIRTABLE_SECOND_SLACK_ID_FIELD]);
-    await slack.client.chat.postMessage({
-      channel: AIRTABLE_SECOND_NOTIFY_CHANNEL_ID,
-      text: formatAirtableRecord(record, slackId, false, {
-        tableName: AIRTABLE_SECOND_TABLE_NAME,
-        notifyFields: AIRTABLE_SECOND_NOTIFY_FIELDS,
-        messageTemplate: AIRTABLE_SECOND_CUSTOM_MESSAGE_TEMPLATE,
-      }),
+    if (!slackId) {
+      console.warn(`Skipped ${AIRTABLE_SECOND_TABLE_NAME} status update ${record.id}: missing Slack ID field '${AIRTABLE_SECOND_SLACK_ID_FIELD}'.`);
+      continue;
+    }
+
+
+    let messageTemplate = AIRTABLE_SECOND_CUSTOM_MESSAGE_TEMPLATE;
+    if (statusNow === AIRTABLE_SECOND_REJECTED_VALUE.toLowerCase()) {
+      messageTemplate = process.env.AIRTABLE_SECOND_REJECTED_MESSAGE_TEMPLATE || 'Hey <@U082UPTRQU8>, your workshop was rejected. Please contact support if you have questions.';
+    } else if (statusNow === 'closed') {
+      messageTemplate = process.env.AIRTABLE_SECOND_CLOSED_MESSAGE_TEMPLATE || 'Hey {mention}, your enclosure workshop is now closed. Please ensure all submissions are complete. If you have questions, contact the admin.';
+    }
+    const messageText = formatAirtableRecord(record, slackId, false, {
+      tableName: AIRTABLE_SECOND_TABLE_NAME,
+      notifyFields: AIRTABLE_SECOND_NOTIFY_FIELDS,
+      messageTemplate,
     });
+
+    await slack.client.chat.postMessage({
+      channel: slackId,
+      text: messageText,
+    });
+
+    if (statusNow !== AIRTABLE_SECOND_REJECTED_VALUE.toLowerCase()) {
+      await slack.client.chat.postMessage({
+        channel: AIRTABLE_SECOND_NOTIFY_CHANNEL_ID,
+        text: messageText,
+      });
+    }
   }
 }
 
