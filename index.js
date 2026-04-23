@@ -316,6 +316,13 @@ function getReviewStatusLabel(statusValue) {
   return "Pending";
 }
 
+function getReviewStatusIcon(statusValue) {
+  const normalized = normalizeReviewStatus(statusValue);
+  if (normalized === "approved") return "✅";
+  if (normalized === "rejected") return "❌";
+  return "";
+}
+
 async function upsertSubmissionReviewStatus(recordId, slackId, reviewStatus) {
   await pool.query(
     `
@@ -479,27 +486,31 @@ function getFirstTableReviewComment(fields = {}, reviewStatus = "rejected") {
 
 function appendFirstTableReviewComment(messageText, fields = {}, reviewStatus = "rejected") {
   const normalizedReviewStatus = normalizeReviewStatus(reviewStatus);
-  const statusLabel = getReviewStatusLabel(normalizedReviewStatus);
   const reviewComment = getFirstTableReviewComment(fields, normalizedReviewStatus);
   if (!reviewComment) {
-    return `${messageText}\n📌 *Review status:* ${statusLabel}`;
+    return messageText;
   }
 
   const label = normalizedReviewStatus === "approved" ? "Acceptance comment" : "Rejection comment";
-  return `${messageText}\n📌 *Review status:* ${statusLabel}\n💬 *${label}:* ${reviewComment}`;
+  return `${messageText}\n💬 *${label}:* ${reviewComment}`;
 }
 
 function appendApprovedChannelLinks(messageText, fields = {}) {
   const journalLink = getFieldTextValue(fields, AIRTABLE_JOURNAL_LINK_FIELD);
   const playableUrl = getFieldTextValue(fields, AIRTABLE_PLAYABLE_URL_FIELD);
+  const tierValue = getFieldTextValue(fields, "Tier");
   const extras = [];
+
+  if (tierValue) {
+    extras.push(`🏷️ *Tier:* ${tierValue}`);
+  }
 
   if (journalLink) {
     extras.push(`🔗 *Journal link:* ${journalLink}`);
   }
 
   if (playableUrl) {
-    extras.push(`🎮 *Playable URL:* ${playableUrl}`);
+    extras.push(`🧩 *Model URL:* ${playableUrl}`);
   }
 
   if (!extras.length) {
@@ -507,6 +518,25 @@ function appendApprovedChannelLinks(messageText, fields = {}) {
   }
 
   return `${messageText}\n${extras.join("\n")}`;
+}
+
+async function sendMailStatusShippedDm(record) {
+  const fields = record.fields || {};
+  const slackId = normalizeSlackId(fields[AIRTABLE_SLACK_ID_FIELD]);
+  if (!slackId) {
+    console.warn(`Skipped mail-status update ${record.id}: missing Slack ID field '${AIRTABLE_SLACK_ID_FIELD}'.`);
+    return;
+  }
+
+  const projectName = getFieldTextValue(fields, "Project Name") || "your project";
+  const trackingLink = getFieldTextValue(fields, "Tracking Link");
+  const trackingLine = trackingLink ? `\n🔎 Tracking: ${trackingLink}` : "";
+  const messageText = `📦 ${projectName} has been shipped!${trackingLine}`;
+
+  await slack.client.chat.postMessage({
+    channel: slackId,
+    text: messageText,
+  });
 }
 
 function isMailStatusShipped(fields = {}) {
@@ -671,10 +701,14 @@ async function sendFirstTableNotification(record, options = {}) {
   await upsertSubmissionReviewStatus(record.id, slackId, derivedStatus);
   const dbReviewStatus = (await getSubmissionReviewStatus(record.id)) || derivedStatus;
 
+  const statusLabel = getReviewStatusLabel(dbReviewStatus);
+  const statusIcon = getReviewStatusIcon(dbReviewStatus);
+  const dmBaseMessageTemplate = `{mention} your project {Project Name} has been ${statusLabel.toLowerCase()} for tier {Tier}. ${statusIcon}`.trim();
+
   const dmBaseMessageText = formatAirtableRecord(record, slackId, false, {
     tableName: AIRTABLE_TABLE_NAME,
     notifyFields: AIRTABLE_NOTIFY_FIELDS,
-    messageTemplate: AIRTABLE_DM_CUSTOM_MESSAGE_TEMPLATE,
+    messageTemplate: dmBaseMessageTemplate,
     excludedFieldNames: ["Name", "Status", AIRTABLE_MAIL_STATUS_FIELD],
     includeEntryLine: false,
   });
@@ -777,7 +811,8 @@ async function pollAirtableAndNotify() {
     const shippedNow = isMailStatusShipped(record.fields || {});
     const shippedBefore = isMailStatusShipped(previousFields);
     if (shippedNow && !shippedBefore) {
-      console.log(`Airtable record ${record.id} mail status changed to '${AIRTABLE_MAIL_STATUS_SHIPPED_VALUE}'. Sending Slack DM only.`);
+      console.log(`Airtable record ${record.id} mail status changed to '${AIRTABLE_MAIL_STATUS_SHIPPED_VALUE}'. Sending Slack DM.`);
+      await sendMailStatusShippedDm(record);
     }
 
     if (reviewStatus === "pending") {
