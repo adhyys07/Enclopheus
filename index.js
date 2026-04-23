@@ -703,7 +703,7 @@ async function sendFirstTableNotification(record, options = {}) {
 
   const statusLabel = getReviewStatusLabel(dbReviewStatus);
   const statusIcon = getReviewStatusIcon(dbReviewStatus);
-  const dmBaseMessageTemplate = `{mention} your project {Project Name} has been ${statusLabel.toLowerCase()} for tier {Tier}. ${statusIcon}`.trim();
+  const dmBaseMessageTemplate = `{mention} your project {Project Name} has been ${statusLabel.toLowerCase()} for {Tier}. ${statusIcon}`.trim();
 
   const dmBaseMessageText = formatAirtableRecord(record, slackId, false, {
     tableName: AIRTABLE_TABLE_NAME,
