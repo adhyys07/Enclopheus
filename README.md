@@ -16,6 +16,7 @@ The app includes:
 - Track sent Airtable notifications to avoid duplicate messages
 - DMs rejection messages and approval messages are sent to the channel and dmed personally with feedback
 - Support a second Airtable table for additional workflow notifications
+- It will send you a cute heyo gang message whenever someone greets her
 - Run locally with Node.js or in production with Docker
 
 ## Requirements
