@@ -2,17 +2,18 @@ import express from "express";
 import session from "express-session";
 import connectPgSimple from "connect-pg-simple";
 import dotenv from "dotenv";
-import { App as SlackApp } from "@slack/bolt";
 import { v4 as uuidv4 } from "uuid";
 import path from "path";
 import { fileURLToPath } from "url";
 import authRoutes from "./auth.js";
 import { pool } from "./db.js";
+import bolt from "@slack/bolt";
 
 dotenv.config({ quiet: true });
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const { App: SlackApp, ExpressReceiver } = bolt;
 const OWNERS = (process.env.OWNERS || "")
   .split(",")
   .map((s) => s.trim())
@@ -60,7 +61,12 @@ async function isUserBlocked(slackId) {
 
 /* ---------- WEB SERVER ---------- */
 
-const app = express();
+const receiver = new ExpressReceiver({
+  signingSecret: process.env.SLACK_SIGNING_SECRET,
+  endpoints: "/slack/events",
+});
+
+const app = receiver.app;
 app.use(express.json());
 app.use(express.static("public"));
 
@@ -87,7 +93,7 @@ app.get("/dashboard", requireAdmin, (_req, res) => {
 
 const slack = new SlackApp({
   token: process.env.SLACK_BOT_TOKEN,
-  signingSecret: process.env.SLACK_SIGNING_SECRET,
+  receiver,
 });
 
 /* ---------- AIRTABLE TO SLACK ---------- */
@@ -128,7 +134,6 @@ const AIRTABLE_SECOND_NOTIFY_FIELDS = (process.env.AIRTABLE_SECOND_NOTIFY_FIELDS
   .split(",")
   .map((s) => s.trim())
   .filter(Boolean);
-const SLACK_BOLT_PORT = Number(process.env.SLACK_BOLT_PORT || 3001);
 
 const seenAirtableRecords = new Map();
 const seenAirtableSecondRecords = new Map();
@@ -140,7 +145,7 @@ let airtableSecondConfigWarningShown = false;
 
 function isGreetingForEnclopheus(text = "") {
   const input = String(text);
-  const hasGreeting = /\b(?:hello|hi)\b/i.test(input);
+  const hasGreeting = /\b(?:heyo|hello|hi|hey)\b/i.test(input);
   const hasNameOrMention = /\benclopheus\b/i.test(input) || /<@[A-Z0-9]+>/i.test(input);
   return hasGreeting && hasNameOrMention;
 }
@@ -1152,11 +1157,9 @@ app.post("/api/conversations/:id/block", requireAdmin, async (req, res) => {
   await ensureSubmissionReviewStatusesTable();
   await ensureSubmissionNotificationStateTable();
   await seedSubmissionNotificationStateFromReviewStatuses();
-  await slack.start(SLACK_BOLT_PORT); // Slack events
-  console.log("Slack Bolt running on port", SLACK_BOLT_PORT);
-  app.listen(process.env.PORT, () =>
-    console.log("🌐 Dashboard running on port", process.env.PORT)
-  );
+  await slack.start(Number(process.env.PORT || 3000));
+  console.log("Slack Bolt running on port", process.env.PORT || 3000);
+  console.log("🌐 Dashboard running on port", process.env.PORT || 3000);
 
   setInterval(async () => {
     try {
