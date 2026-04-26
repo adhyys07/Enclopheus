@@ -1,5 +1,6 @@
 import express from "express";
 import session from "express-session";
+import connectPgSimple from "connect-pg-simple";
 import dotenv from "dotenv";
 import { App as SlackApp } from "@slack/bolt";
 import { v4 as uuidv4 } from "uuid";
@@ -8,7 +9,7 @@ import { fileURLToPath } from "url";
 import authRoutes from "./auth.js";
 import { pool } from "./db.js";
 
-dotenv.config();
+dotenv.config({ quiet: true });
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -63,7 +64,14 @@ const app = express();
 app.use(express.json());
 app.use(express.static("public"));
 
+const PgSession = connectPgSimple(session);
+
 app.use(session({
+  store: new PgSession({
+    pool,
+    tableName: "user_sessions",
+    createTableIfMissing: true,
+  }),
   secret: process.env.SESSION_SECRET,
   resave: false,
   saveUninitialized: false,
