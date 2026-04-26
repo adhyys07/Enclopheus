@@ -139,7 +139,10 @@ let airtableConfigWarningShown = false;
 let airtableSecondConfigWarningShown = false;
 
 function isGreetingForEnclopheus(text = "") {
-  return /\b(?:hello|hi)\s+(?:enclopheus|<@[A-Z0-9]+>)\b/i.test(String(text));
+  const input = String(text);
+  const hasGreeting = /\b(?:hello|hi)\b/i.test(input);
+  const hasNameOrMention = /\benclopheus\b/i.test(input) || /<@[A-Z0-9]+>/i.test(input);
+  return hasGreeting && hasNameOrMention;
 }
 
 async function maybeReplyGreeting(event) {
