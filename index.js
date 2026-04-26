@@ -138,6 +138,35 @@ let airtableSecondInitialized = false;
 let airtableConfigWarningShown = false;
 let airtableSecondConfigWarningShown = false;
 
+function isGreetingForEnclopheus(text = "") {
+  return /\b(?:hello|hi)\s+(?:enclopheus|<@[A-Z0-9]+>)\b/i.test(String(text));
+}
+
+async function maybeReplyGreeting(event) {
+  const text = (event && event.text ? event.text : "").trim();
+  if (!text) return false;
+
+  if (event.subtype || event.bot_id) return false;
+  if (!isGreetingForEnclopheus(text)) return false;
+  if (event.channel_type === "im") return false;
+
+  const fallbackKey = `${event.channel || ""}:${event.thread_ts || event.ts || ""}:${text.toLowerCase()}`;
+  const greetingEventKey = `${event.channel || ""}:${event.client_msg_id || event.event_ts || event.ts || fallbackKey}`;
+  if (recentGreetingEvents.has(greetingEventKey)) {
+    return true;
+  }
+  recentGreetingEvents.add(greetingEventKey);
+  setTimeout(() => recentGreetingEvents.delete(greetingEventKey), 10 * 60 * 1000);
+
+  await slack.client.chat.postMessage({
+    channel: event.channel,
+    text: "heyo gng!",
+    thread_ts: event.thread_ts || event.ts,
+  });
+
+  return true;
+}
+
 async function ensureSubmissionReviewStatusesTable() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS submission_review_statuses (
@@ -926,28 +955,20 @@ async function pollSecondAirtableAndNotify() {
   }
 }
 
+slack.event("app_mention", async ({ event }) => {
+  await maybeReplyGreeting(event);
+});
+
 slack.event("message", async ({ event }) => {
+  const didReplyGreeting = await maybeReplyGreeting(event);
+  if (didReplyGreeting && event.channel_type !== "im") {
+    return;
+  }
+
   const text = (event.text || "").trim();
   if (!text) return;
 
   if (event.subtype || event.bot_id) return;
-
-  const saysGreetingEnclopheus = /\b(?:hello|hi)\s+enclopheus\b/i.test(text);
-  if (saysGreetingEnclopheus && event.channel_type !== "im") {
-    const greetingEventKey = `${event.channel}:${event.client_msg_id || event.ts || event.event_ts || ""}`;
-    if (recentGreetingEvents.has(greetingEventKey)) {
-      return;
-    }
-    recentGreetingEvents.add(greetingEventKey);
-    setTimeout(() => recentGreetingEvents.delete(greetingEventKey), 10 * 60 * 1000);
-
-    await slack.client.chat.postMessage({
-      channel: event.channel,
-      text: "heyo gng!",
-      thread_ts: event.thread_ts || event.ts,
-    });
-    return;
-  }
 
   if (event.channel_type !== "im") return;
 
