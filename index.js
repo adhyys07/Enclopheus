@@ -132,6 +132,7 @@ const SLACK_BOLT_PORT = Number(process.env.SLACK_BOLT_PORT || 3001);
 
 const seenAirtableRecords = new Map();
 const seenAirtableSecondRecords = new Map();
+const recentGreetingEvents = new Set();
 let airtableInitialized = false;
 let airtableSecondInitialized = false;
 let airtableConfigWarningShown = false;
@@ -926,11 +927,31 @@ async function pollSecondAirtableAndNotify() {
 }
 
 slack.event("message", async ({ event }) => {
-  if (event.subtype || event.channel_type !== "im") return;
-
-  const slackId = event.user;
   const text = (event.text || "").trim();
   if (!text) return;
+
+  if (event.subtype || event.bot_id) return;
+
+  const saysGreetingEnclopheus = /\b(?:hello|hi)\s+enclopheus\b/i.test(text);
+  if (saysGreetingEnclopheus && event.channel_type !== "im") {
+    const greetingEventKey = `${event.channel}:${event.client_msg_id || event.ts || event.event_ts || ""}`;
+    if (recentGreetingEvents.has(greetingEventKey)) {
+      return;
+    }
+    recentGreetingEvents.add(greetingEventKey);
+    setTimeout(() => recentGreetingEvents.delete(greetingEventKey), 10 * 60 * 1000);
+
+    await slack.client.chat.postMessage({
+      channel: event.channel,
+      text: "heyo gng!",
+      thread_ts: event.thread_ts || event.ts,
+    });
+    return;
+  }
+
+  if (event.channel_type !== "im") return;
+
+  const slackId = event.user;
 
   if (OWNERS.includes(slackId)) {
     return;
