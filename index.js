@@ -124,6 +124,12 @@ const AIRTABLE_NOTIFY_FIELDS = (process.env.AIRTABLE_NOTIFY_FIELDS || "")
   .map((s) => s.trim())
   .filter(Boolean);
 
+// Grant field notification
+const AIRTABLE_GRANT_FIELD = process.env.AIRTABLE_GRANT_FIELD || "Grant";
+const AIRTABLE_GRANT_GRANTED_VALUE = process.env.AIRTABLE_GRANT_GRANTED_VALUE || "Granted";
+const AIRTABLE_GRANT_GRANTED_MESSAGE_TEMPLATE = process.env.AIRTABLE_GRANT_GRANTED_MESSAGE_TEMPLATE || "🎉 {mention} your grant has been *Granted*!";
+const AIRTABLE_GRANT_LINK_FIELD = process.env.AIRTABLE_GRANT_LINK_FIELD || "Grant link";
+
 const AIRTABLE_SECOND_TABLE_NAME = process.env.AIRTABLE_SECOND_TABLE_NAME;
 const AIRTABLE_SECOND_NOTIFY_CHANNEL_ID = process.env.SLACK_AIRTABLE_SECOND_CHANNEL_ID;
 const AIRTABLE_SECOND_SLACK_ID_FIELD = process.env.AIRTABLE_SECOND_SLACK_ID_FIELD || AIRTABLE_SLACK_ID_FIELD;
@@ -603,6 +609,50 @@ function didMailStatusChange(previousFields = {}, currentFields = {}) {
   return JSON.stringify(previousFields[AIRTABLE_MAIL_STATUS_FIELD]) !== JSON.stringify(currentFields[AIRTABLE_MAIL_STATUS_FIELD]);
 }
 
+function isGrantGranted(fields = {}) {
+  const raw = fields[AIRTABLE_GRANT_FIELD];
+
+  if (raw === undefined || raw === null) {
+    return false;
+  }
+
+  if (Array.isArray(raw)) {
+    return raw.some((value) => String(value).trim().toLowerCase() === AIRTABLE_GRANT_GRANTED_VALUE.toLowerCase());
+  }
+
+  return String(raw).trim().toLowerCase() === AIRTABLE_GRANT_GRANTED_VALUE.toLowerCase();
+}
+
+function didGrantChange(previousFields = {}, currentFields = {}) {
+  return JSON.stringify(previousFields[AIRTABLE_GRANT_FIELD]) !== JSON.stringify(currentFields[AIRTABLE_GRANT_FIELD]);
+}
+
+async function sendGrantGrantedDm(record) {
+  const fields = record.fields || {};
+  const slackId = normalizeSlackId(fields[AIRTABLE_SLACK_ID_FIELD]);
+  if (!slackId) {
+    console.warn(`Skipped grant update ${record.id}: missing Slack ID field '${AIRTABLE_SLACK_ID_FIELD}'.`);
+    return;
+  }
+
+  let messageText = formatAirtableRecord(record, slackId, false, {
+    tableName: AIRTABLE_TABLE_NAME,
+    notifyFields: AIRTABLE_NOTIFY_FIELDS,
+    messageTemplate: AIRTABLE_GRANT_GRANTED_MESSAGE_TEMPLATE,
+    includeEntryLine: false,
+  });
+
+  const grantLink = getFieldTextValue(fields, AIRTABLE_GRANT_LINK_FIELD);
+  if (grantLink) {
+    messageText = `${messageText}\n🔗 *Grant link:* ${grantLink}`;
+  }
+
+  await slack.client.chat.postMessage({
+    channel: slackId,
+    text: messageText,
+  });
+}
+
 function getSecondTableStatusValue(fields = {}) {
   const raw = fields[AIRTABLE_SECOND_STATUS_FIELD];
 
@@ -859,6 +909,18 @@ async function pollAirtableAndNotify() {
     if (shippedNow && !shippedBefore) {
       console.log(`Airtable record ${record.id} mail status changed to '${AIRTABLE_MAIL_STATUS_SHIPPED_VALUE}'. Sending Slack DM.`);
       await sendMailStatusShippedDm(record);
+    }
+
+    // Grant field changed to Granted -> notify user
+    const grantNow = isGrantGranted(record.fields || {});
+    const grantBefore = isGrantGranted(previousFields || {});
+    if (grantNow && !grantBefore) {
+      console.log(`Airtable record ${record.id} grant field changed to '${AIRTABLE_GRANT_GRANTED_VALUE}'. Sending Slack DM.`);
+      try {
+        await sendGrantGrantedDm(record);
+      } catch (err) {
+        console.error(`Failed to send grant notification for ${record.id}:`, err && err.message ? err.message : err);
+      }
     }
 
     if (reviewStatus === "pending") {

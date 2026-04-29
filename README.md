@@ -13,6 +13,7 @@ The app includes:
 - Keep the user up to date with their enclosure project and fulfillment status
 - Add users to the slack channels if the user signed up on enclosure.hackclub.com
 - Send Slack DMs and channel notifications based on Airtable records
+- It updates the user about their grant status.
 - Track sent Airtable notifications to avoid duplicate messages
 - DMs rejection messages and approval messages are sent to the channel and dmed personally with feedback
 - Support a second Airtable table for additional workflow notifications
