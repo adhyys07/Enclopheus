@@ -1,6 +1,7 @@
 # Enclopheus
 
-Enclopheus is a Node.js Slack app with an admin dashboard for managing anonymous Slack conversations and Airtable-driven submission notifications.
+Enclopheus is a slack bot for Enclosure YSWS to keep the participants up to date about the status and fulfillment for their project so that participants don't need to DM the organizers.
+Enclopheus is hosted on HQ's coolify to manage all the messages and automations.
 
 The app includes:
 
@@ -11,13 +12,13 @@ The app includes:
 ## What It Can Do
 
 - Keep the user up to date with their enclosure project and fulfillment status
-- Add users to the slack channels if the user signed up on enclosure.hackclub.com
-- Send Slack DMs and channel notifications based on Airtable records
-- It updates the user about their grant status.
+- Add users to the slack channels if the user signed up on enclosure.hackclub.com.
+- Send Slack DMs and channel notifications based on Airtable records.
+- It updates the user about their grant status with their grant link and tells of what tier the grant is.
 - Track sent Airtable notifications to avoid duplicate messages
 - DMs rejection messages and approval messages are sent to the channel and dmed personally with feedback
 - Support a second Airtable table for additional workflow notifications
-- It will send you a cute heyo gang message whenever someone greets her
+- It will send you a cute heyo gang message whenever someone greets the bot.
 - Run locally with Node.js or in production with Docker
 
 ## Requirements
@@ -27,6 +28,7 @@ The app includes:
 - PostgreSQL
 - Slack app credentials
 - Airtable API credentials, if Airtable notifications are enabled
+- A hosting service to keep the operations smooth in the production and it's suggested to use a basic local hosting for local development
 
 ## Database Setup
 

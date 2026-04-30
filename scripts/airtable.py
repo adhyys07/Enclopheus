@@ -4,10 +4,8 @@ import time
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-# ✅ Fix unicode printing
 sys.stdout.reconfigure(encoding='utf-8')
 
-# 🔐 CONFIG
 TOKEN = "slack-bot-token"
 
 CHANNELS = [
@@ -18,7 +16,6 @@ AIRTABLE_API_KEY = "airtable_api_key"
 BASE_ID = "baseid"
 TABLE_NAME = "users"
 
-# 📥 Airtable fetch
 def fetch_all_records():
     url = f"https://api.airtable.com/v0/{BASE_ID}/{TABLE_NAME}"
     headers = {
