@@ -634,22 +634,34 @@ async function sendGrantGrantedDm(record) {
     console.warn(`Skipped grant update ${record.id}: missing Slack ID field '${AIRTABLE_SLACK_ID_FIELD}'.`);
     return;
   }
-
-  let messageText = formatAirtableRecord(record, slackId, false, {
-    tableName: AIRTABLE_TABLE_NAME,
-    notifyFields: AIRTABLE_NOTIFY_FIELDS,
-    messageTemplate: AIRTABLE_GRANT_GRANTED_MESSAGE_TEMPLATE,
-    includeEntryLine: false,
-  });
-
+  const mention = `<@${slackId}>`;
+  const projectName = getFieldTextValue(fields, "Project Name");
+  const tier = getFieldTextValue(fields, "Tier");
   const grantLink = getFieldTextValue(fields, AIRTABLE_GRANT_LINK_FIELD);
-  if (grantLink) {
-    messageText = `${messageText}\n🔗 *Grant link:* ${grantLink}`;
+
+  const lines = [];
+  // First line: mention + granted message
+  lines.push(`${mention} your grant has been *Granted*!`);
+
+  if (projectName) {
+    lines.push(`• *Project Name:* ${projectName}`);
   }
+
+  if (tier) {
+    lines.push(`• *Tier:* ${tier}`);
+  }
+
+  if (grantLink) {
+    lines.push(`🔗 *Grant link:* ${grantLink}`);
+  }
+
+  const messageText = lines.join("\n");
 
   await slack.client.chat.postMessage({
     channel: slackId,
     text: messageText,
+    unfurl_links: false,
+    unfurl_media: false,
   });
 }
 
