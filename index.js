@@ -68,6 +68,11 @@ const receiver = new ExpressReceiver({
 
 const app = receiver.app;
 app.use(express.json());
+
+app.get("/healthz", (_req, res) => {
+  res.status(200).json({ ok: true });
+});
+
 app.use(express.static("public"));
 
 const PgSession = connectPgSimple(session);
@@ -1226,25 +1231,48 @@ app.post("/api/conversations/:id/block", requireAdmin, async (req, res) => {
   res.json({ ok: true });
 });
 
+async function runAirtablePollers() {
+  try {
+    await Promise.all([
+      pollAirtableAndNotify(),
+      pollSubmissionReviewStatusChangesAndNotify(),
+      pollSecondAirtableAndNotify(),
+    ]);
+  } catch (error) {
+    console.error("Airtable poll failed:", error.message);
+  }
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function startBackgroundTasks() {
+  const retryDelayMs = Math.min(AIRTABLE_POLL_INTERVAL_MS, 30000);
+
+  while (true) {
+    try {
+      await ensureSubmissionReviewStatusesTable();
+      await ensureSubmissionNotificationStateTable();
+      await seedSubmissionNotificationStateFromReviewStatuses();
+      await runAirtablePollers();
+      setInterval(runAirtablePollers, AIRTABLE_POLL_INTERVAL_MS);
+      return;
+    } catch (error) {
+      console.error("Startup background setup failed:", error);
+      await delay(retryDelayMs);
+    }
+  }
+}
+
 
 (async () => {
-  await ensureSubmissionReviewStatusesTable();
-  await ensureSubmissionNotificationStateTable();
-  await seedSubmissionNotificationStateFromReviewStatuses();
-  await slack.start(Number(process.env.PORT || 3000));
-  console.log("Slack Bolt running on port", process.env.PORT || 3000);
-  console.log("🌐 Dashboard running on port", process.env.PORT || 3000);
+  const port = Number(process.env.PORT || 3000);
 
-  setInterval(async () => {
-    try {
-      await Promise.all([
-        pollAirtableAndNotify(),
-        pollSubmissionReviewStatusChangesAndNotify(),
-        pollSecondAirtableAndNotify(),
-      ]);
-    } catch (error) {
-      console.error("Airtable poll failed:", error.message);
-    }
-  }, AIRTABLE_POLL_INTERVAL_MS);
+  await slack.start(port);
+  console.log("Slack Bolt running on port", port);
+  console.log("🌐 Dashboard running on port", port);
+
+  void startBackgroundTasks();
 
 })();
