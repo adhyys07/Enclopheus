@@ -23,6 +23,19 @@ function normalizeDatabaseUrl(rawUrl) {
   }
 }
 
+function describeDatabaseUrl(rawUrl) {
+  if (!rawUrl) return "DATABASE_URL is not set";
+
+  try {
+    const parsed = new URL(rawUrl);
+    return `${parsed.protocol}//${parsed.username || "<no-user>"}:***@${parsed.hostname}:${parsed.port || "5432"}${parsed.pathname}`;
+  } catch {
+    return "DATABASE_URL is set but could not be parsed";
+  }
+}
+
+console.log("Database target:", describeDatabaseUrl(process.env.DATABASE_URL));
+
 export const pool = new Pool({
   connectionString: normalizeDatabaseUrl(process.env.DATABASE_URL),
 });
