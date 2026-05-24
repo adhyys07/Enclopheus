@@ -1247,6 +1247,10 @@ function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function isPermanentDatabaseStartupError(error) {
+  return ["28P01", "3D000", "28000"].includes(error?.code);
+}
+
 async function startBackgroundTasks() {
   const retryDelayMs = Math.min(AIRTABLE_POLL_INTERVAL_MS, 30000);
 
@@ -1260,6 +1264,10 @@ async function startBackgroundTasks() {
       return;
     } catch (error) {
       console.error("Startup background setup failed:", error);
+      if (isPermanentDatabaseStartupError(error)) {
+        console.error("Database startup will not retry until the app restarts. Check DATABASE_URL credentials and database name.");
+        return;
+      }
       await delay(retryDelayMs);
     }
   }
